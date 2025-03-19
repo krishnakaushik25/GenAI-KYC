@@ -85,13 +85,14 @@ def delete_document(doc_id, user, doc_type, filename):
     # Delete file from Supabase Storage
     storage_response = supabase_client.storage.from_("kyc-documents").remove([file_path])
 
-    if storage_response.error:
-        return False, f"Error deleting file from storage: {storage_response.error.message}"
+    # 🔹 Correct way to check for errors
+    if isinstance(storage_response, list) and len(storage_response) > 0 and "error" in storage_response[0]:
+        return False, f"Error deleting file from storage: {storage_response[0]['error']}"
 
     # Remove document metadata from Supabase Database
     response = supabase_client.table("documents").delete().eq("document_id", doc_id).execute()
 
-    if response.error:
+    if hasattr(response, "error") and response.error:
         return False, f"Error deleting document from database: {response.error.message}"
 
     return True, None
