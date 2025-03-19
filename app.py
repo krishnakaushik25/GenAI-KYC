@@ -66,9 +66,7 @@ if not st.session_state["user_logged_in"]:
         st.session_state["page"] = "signin"
     if st.sidebar.button("Sign Up"):
         st.session_state["page"] = "signup"
-else:
-    st.sidebar.write(f"Logged in as **{st.session_state['username']}**")
-    
+else:    
     if st.sidebar.button("Upload Documents"):
         st.session_state["page"] = "upload_documents"
     if st.sidebar.button("Fetch Documents"):

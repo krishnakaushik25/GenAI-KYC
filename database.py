@@ -96,3 +96,12 @@ def delete_document(doc_id, user, doc_type, filename):
         return False, f"Error deleting document from database: {response.error.message}"
 
     return True, None
+
+def get_all_documents():
+    """Fetch all documents from the database."""
+    response = supabase_client.table("documents").select("*").execute()
+
+    if response and hasattr(response, 'data') and response.data is not None:
+        return response.data  # Ensure it returns a list
+    
+    return []  # Return an empty list if no data is found
