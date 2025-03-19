@@ -4,6 +4,7 @@ import supabase
 from kyc import know_your_customer
 from see_user_docs import see_user_documents
 from database import supabase_client
+from kyc import process_existing_documents
 
 # Page configuration
 st.set_page_config(page_title="GenAI-KYC", layout="wide")
@@ -99,6 +100,7 @@ elif st.session_state["page"] == "signup":
 
 elif st.session_state["page"] == "upload_documents":
     upload_documents()
+    process_existing_documents()
 
 elif st.session_state["page"] == "fetch_documents":
     fetch_documents()
