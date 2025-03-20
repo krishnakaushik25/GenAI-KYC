@@ -1,144 +1,174 @@
 import pytesseract
 from PIL import Image
-import pandas as pd
-import tempfile
-import json
 import streamlit as st
-from database import supabase_client
-from dotenv import load_dotenv
+import json
+import tempfile
 import os
+import io
+import pymupdf
+fitz = pymupdf
+from pdfminer.high_level import extract_text
 import requests
+from dotenv import load_dotenv
 from llama_index.llms.gemini import Gemini
 from llama_index.embeddings.gemini import GeminiEmbedding
 from llama_index.core import Document, Settings, SimpleDirectoryReader, VectorStoreIndex
+from database import supabase_client  # Ensure this is properly configured
 
-
-# Configure Gemini API
+# Load environment variables
 load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+# Configure Gemini
 llm = Gemini(api_key=GEMINI_API_KEY)
 embed_model = GeminiEmbedding(api_key=GEMINI_API_KEY)
 Settings.embed_model = embed_model
 
-pytesseract.pytesseract.tesseract_cmd="C:\Program Files\Tesseract-OCR\\tesseract.exe"
+# Set Tesseract OCR Path
+pytesseract.pytesseract.tesseract_cmd = "C:\Program Files\Tesseract-OCR\\tesseract.exe"
 
-def download_file(file_url):
-    """Downloads a file from a Supabase storage URL and saves it locally."""
+# Supabase bucket name
+BUCKET_NAME = "kyc-documents"
+
+
+def list_users():
+    """Fetches user folders inside the 'kyc-documents' bucket."""
+    response = supabase_client.storage.from_(BUCKET_NAME).list()
+    if response:
+        return [folder["name"] for folder in response if folder["name"] != ".emptyFolder"]
+    return []
+
+
+def list_subfolders(username):
+    """Lists subfolders inside a user's folder (e.g., 'Address Proof', 'ID Proof')."""
+    response = supabase_client.storage.from_(BUCKET_NAME).list(username + "/")
+    if response:
+        return [folder["name"] for folder in response if folder["name"] != ".emptyFolder"]
+    return []
+
+
+def list_files_in_subfolders(username, subfolders):
+    """Fetches all actual files inside the selected subfolders."""
+    files_to_process = []
+    for folder in subfolders:
+        folder_path = f"{username}/{folder}/"
+        response = supabase_client.storage.from_(BUCKET_NAME).list(folder_path)
+        if response:
+            for file in response:
+                files_to_process.append(f"{folder}/{file['name']}")  # Store relative path
+    return files_to_process
+
+
+def download_file(username, file_path):
+    """Downloads a file from the selected user's subfolder in Supabase Storage."""
+    full_path = f"{username}/{file_path}"
+    file_url = supabase_client.storage.from_(BUCKET_NAME).get_public_url(full_path)
+
     response = requests.get(file_url, stream=True)
     if response.status_code == 200:
-        temp_file = tempfile.NamedTemporaryFile(delete=False)  # Create a temporary file
+        temp_file = tempfile.NamedTemporaryFile(delete=False)
         temp_file.write(response.content)
         temp_file.close()
-        return temp_file.name  # Return local path of the downloaded file
+        return temp_file.name, file_url  # Return local file path and file URL
     else:
         raise Exception(f"Failed to download file: {file_url}")
 
-def extract_text_from_image(file_url):
-    """Downloads an image from Supabase and extracts text using OCR."""
-    local_file_path = download_file(file_url)
-    image = Image.open(local_file_path)
+
+def extract_text_from_image(file_path):
+    """Extracts text from an image file."""
+    image = Image.open(file_path)
     text = pytesseract.image_to_string(image)
     return text.strip()
 
-def extract_data_from_pdf(file_url):
-    """Downloads a PDF from Supabase and extracts structured text using LlamaIndex."""
-    local_file_path = download_file(file_url)
-    documents = SimpleDirectoryReader(input_files=[local_file_path]).load_data()
-    index = VectorStoreIndex.from_documents(documents, llm=llm, embed_model=embed_model)
 
-    query_engine = index.as_query_engine(llm=llm)
-    response = query_engine.query("Extract key details such as Name, DOB, Address.")
+def extract_text_from_pdf(file_path):
+    """Extract text from a PDF. Uses pdfminer.six for digital PDFs and Tesseract OCR for scanned PDFs."""
+    try:
+        # Try extracting text normally
+        text = extract_text(file_path).strip()
+        if text:
+            return text  # ✅ Return if text is found
 
-    return response.response
+        # If no text is found, apply OCR using PyMuPDF
+        doc = fitz.open(file_path)
+        ocr_text = []
 
-def process_existing_documents():
-    """Fetches all documents from the database and processes them."""
-    response = supabase_client.table("documents").select("*").execute()
+        for page in doc:
+            pix = page.get_pixmap()  # Render page as an image
+            img = Image.open(io.BytesIO(pix.tobytes("png"))) # Convert to PIL image
+            ocr_text.append(pytesseract.image_to_string(img))  # Perform OCR
 
-    if response.data:
-        for doc in response.data:
-            file_url = doc["url"]
-            file_name = doc["filename"]
-            file_extension = file_name.split(".")[-1].lower()  # Extract file type from filename
-            username = doc["user"]  # Assuming "user" is stored instead of "username"
+        extracted_text = "\n".join(ocr_text).strip()
+        return extracted_text if extracted_text else "No extractable text found in the PDF."
 
-            if file_extension in ["png", "jpg", "jpeg", "tiff", "bmp", "webp"]:
-                extracted_text = extract_text_from_image(file_url)
-                document_type = "image"
-            elif file_extension == "pdf":
-                extracted_text = extract_data_from_pdf(file_url)
-                document_type = "pdf"
-            else:
-                continue  # Skip unsupported file types
+    except Exception as e:
+        return f"Error extracting text from PDF: {str(e)}"
 
-            # ✅ Fix: Pass all required arguments
-            save_kyc_data(username, document_type, extracted_text, file_url)
+
+def process_selected_documents(username, file_list):
+    """Processes selected documents for a user."""
+    for file_name in file_list:
+        local_file_path, file_url = download_file(username, file_name)
+        file_extension = file_name.split(".")[-1].lower()
+
+        st.write(f"📂 Processing: {file_name} (Type: {file_extension})")  # Debug log
+
+        if file_extension in ["png", "jpg", "jpeg", "tiff", "bmp", "webp"]:
+            extracted_text = extract_text_from_image(local_file_path)
+            document_type = "image"
+        elif file_extension == "pdf":
+            extracted_text = extract_text_from_pdf(local_file_path)  # ✅ Calls correct function
+            document_type = "pdf"
+        else:
+            st.error(f"❌ Unsupported file format: {file_name}")
+            continue  # Skip unsupported files
+
+        save_kyc_data(username, document_type, extracted_text, file_url)
+        st.success(f"✅ {file_name} processed successfully!")
+        st.subheader(f"Extracted Data from {file_name}:")
+        st.write(extracted_text)
+
+
 
 def save_kyc_data(username, document_type, extracted_data, file_url):
-    """Saves extracted KYC details into the Supabase database."""
+    """Saves extracted KYC details into Supabase."""
     data = {
         "username": username,
         "document_type": document_type,
         "extracted_data": json.dumps(extracted_data),
-        "original_file_url": file_url
+        "original_file_url": file_url,
     }
-
     response = supabase_client.table("kyc_data").insert(data).execute()
     return response
 
-def fetch_all_usernames():
-    """Fetches all unique usernames from the KYC database."""
-    response = supabase_client.table("kyc_data").select("username").execute()
-    if response.data:
-        return list(set([entry["username"] for entry in response.data]))  # Get unique usernames
-    return []
-
-def fetch_user_kyc_details(username):
-    """Fetches KYC details of a selected user."""
-    response = supabase_client.table("kyc_data").select("*").eq("username", username).execute()
-    if response.data:
-        return response.data
-    return []
-
-def generate_summary(extracted_data):
-    """Uses Gemini API to summarize extracted KYC details."""
-    prompt = f"Summarize the following KYC data:\n{extracted_data}"
-    response = llm.complete(prompt)
-    return response.text
 
 def know_your_customer():
     st.title("Know Your Customer (KYC)")
 
-    # Fetch all usernames
-    usernames = fetch_all_usernames()
-
-    if not usernames:
-        st.warning("No KYC data found.")
+    # **Step 1: Select User Folder**
+    users = list_users()
+    if not users:
+        st.warning("No users found in the database.")
         return
 
-    # Dropdown to select a user
-    selected_user = st.selectbox("Select a User", usernames)
+    selected_user = st.selectbox("Select a User", users)
 
     if selected_user:
-        # Fetch and display user's KYC details
-        kyc_details = fetch_user_kyc_details(selected_user)
+        # **Step 2: Select Multiple Folders**
+        subfolders = list_subfolders(selected_user)
+        if not subfolders:
+            st.warning(f"No folders found inside {selected_user}.")
+            return
 
-        if kyc_details:
-            unique_entries = {json.dumps(entry, sort_keys=True) for entry in kyc_details}  # Remove duplicates
+        selected_folders = st.multiselect("Select Folders", subfolders)
 
-            for entry_json in unique_entries:
-                entry = json.loads(entry_json)  # Convert back to dictionary
-                
-                st.subheader(f"Details for {selected_user}")
-                st.write(f"**Document Type:** {entry['document_type']}")
-                st.write(f"**Extracted Data:** {entry['extracted_data']}")
-                st.write(f"[View Original Document]({entry['original_file_url']})")
+        if selected_folders:
+            # **Step 3: Fetch all actual files inside selected folders**
+            files_to_process = list_files_in_subfolders(selected_user, selected_folders)
 
-                # Generate and display summary using Gemini API
-                summary = generate_summary(entry["extracted_data"])
-                st.subheader("Gemini AI Summary:")
-                st.write(summary)
+            if not files_to_process:
+                st.warning("No files found inside selected folders.")
+                return
 
-        else:
-            st.warning("No details found for this user.")
-
+            if st.button("Process Documents"):
+                process_selected_documents(selected_user, files_to_process)

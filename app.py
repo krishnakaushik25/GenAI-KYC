@@ -1,10 +1,11 @@
 import streamlit as st
 from document_management import upload_documents, fetch_documents
+from process import process_documents  # Import the process function
 import supabase
 from kyc import know_your_customer
 from see_user_docs import see_user_documents
 from database import supabase_client
-from kyc import process_existing_documents
+from easy_kyc import easy_kyc
 
 # Page configuration
 st.set_page_config(page_title="GenAI-KYC", layout="wide")
@@ -19,8 +20,13 @@ st.markdown(
             border-radius: 8px;
             box-shadow: 3px 3px 8px rgba(0, 0, 0, 0.3);
             transition: 0.3s;
-            width: 100%;
+            width: 100% !important; /* ✅ Ensures button fills sidebar width */
+            height: 50px; /* ✅ Adjusts button height for better visibility */
             font-size: 16px;
+            text-align: center;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
         .sidebar .stButton>button:hover {
             background-color: #45a049;
@@ -59,31 +65,35 @@ is_admin_user = is_admin(username) if username else False  # ✅ Avoids calling 
 # Sidebar Navigation
 st.sidebar.title("Navigation")
 
-if st.sidebar.button("Home"):
+if st.sidebar.button("Home", use_container_width=True):
     st.session_state["page"] = "home"
 
 if not st.session_state["user_logged_in"]:
-    if st.sidebar.button("Sign In"):
+    if st.sidebar.button("Sign In", use_container_width=True):
         st.session_state["page"] = "signin"
-    if st.sidebar.button("Sign Up"):
+    if st.sidebar.button("Sign Up", use_container_width=True):
         st.session_state["page"] = "signup"
-else:    
-    if st.sidebar.button("Upload Documents"):
+else:
+    st.sidebar.write(f"Logged in as **{st.session_state['username']}**")
+
+    if st.sidebar.button("Upload Documents", use_container_width=True):
         st.session_state["page"] = "upload_documents"
-    if st.sidebar.button("Fetch Documents"):
+    if st.sidebar.button("Fetch Documents", use_container_width=True):
         st.session_state["page"] = "fetch_documents"
 
     if is_admin_user:
-        if st.sidebar.button("See User Documents"):
+        if st.sidebar.button("See All User Documents (admin)", use_container_width=True):
             st.session_state["page"] = "see_user_documents"
-        if st.sidebar.button("Know Your Customer"):
+        if st.sidebar.button("Generate KYC Details", use_container_width=True):
             st.session_state["page"] = "know_your_customer"
+        if st.sidebar.button("Easy KYC", use_container_width=True):
+            st.session_state["page"] = "KYC"
 
-    if st.sidebar.button("Logout"):
+    if st.sidebar.button("Logout", use_container_width=True):
         st.session_state["user_logged_in"] = False
         st.session_state["username"] = None
         st.session_state["page"] = "home"
-        st.rerun()  # ✅ Ensures app refreshes properly
+        st.rerun()
 
 # Page Navigation Logic
 if st.session_state["page"] == "home":
@@ -100,7 +110,6 @@ elif st.session_state["page"] == "signup":
 
 elif st.session_state["page"] == "upload_documents":
     upload_documents()
-    process_existing_documents()
 
 elif st.session_state["page"] == "fetch_documents":
     fetch_documents()
@@ -110,3 +119,6 @@ elif st.session_state["page"] == "see_user_documents":
 
 elif st.session_state["page"] == "know_your_customer":
     know_your_customer()
+
+elif st.session_state["page"] == "KYC":
+    easy_kyc()

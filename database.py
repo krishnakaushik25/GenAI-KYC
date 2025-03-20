@@ -77,6 +77,14 @@ def get_all_documents():
     response = supabase_client.table("documents").select("*").execute()
     return response.data if response.data else []
 
+def download_file_from_supabase(document_id):
+    """Download file from Supabase storage and return file bytes."""
+    try:
+        response = supabase_client.storage.from_("documents").download(document_id)
+        return response  # Returns file bytes
+    except Exception as e:
+        print(f"Error downloading file: {e}")
+        return None
 
 # Function to delete a document from Supabase
 def delete_document(doc_id, user, doc_type, filename):
