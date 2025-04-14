@@ -26,6 +26,7 @@ This project automates and accelerates the Know Your Customer (KYC) process usin
 ### 1. Clone the Repository
 
 git clone https://github.com/your-username/GenAI-KYC.git
+
 cd GenAI-KYC
 
 ### 2. Install Dependencies
@@ -35,14 +36,23 @@ pip install -r requirements.txt
 ### 3. Add Tessseract to path
 
 Install Tesseract:
+
 Download from: https://github.com/UB-Mannheim/tesseract/wiki
+
 Install to: C:\Program Files\Tesseract-OCR
+
 Add to System PATH:
+
 Go to System Environment Variables → Edit PATH → Add:
+
 C:\Program Files\Tesseract-OCR
+
 Verify in CMD:
+
 tesseract --version
+
 In Python:
+
 pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 
 ### 4. Start the Application
